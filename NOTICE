@@ -1,0 +1,38 @@
+cilium-envoy-rpi — unofficial arm64 / Raspberry Pi build of cilium-envoy
+Copyright 2026 Fuochi
+
+This product redistributes, in compiled form, software from the projects
+listed below. It is NOT affiliated with, sponsored by, or endorsed by the
+Cilium project, the Envoy project, or the CNCF.
+
+------------------------------------------------------------------------------
+Cilium Proxy (cilium/proxy)
+  Copyright The Cilium Authors
+  Licensed under the Apache License, Version 2.0
+  https://github.com/cilium/proxy
+
+Envoy (envoyproxy/envoy)
+  Copyright The Envoy Project Authors
+  Licensed under the Apache License, Version 2.0
+  https://github.com/envoyproxy/envoy
+
+gperftools (gperftools/gperftools)
+  Copyright (c) 2005, Google Inc.
+  Licensed under the BSD 3-Clause License
+  https://github.com/gperftools/gperftools
+------------------------------------------------------------------------------
+
+Modifications by this project:
+  No source code of the above projects is modified. These images are built
+  from unmodified upstream cilium/proxy sources with a single Bazel build
+  option changed to use gperftools instead of tcmalloc:
+      BAZEL_BUILD_OPTS="--define tcmalloc=gperftools"
+  Target architecture: linux/arm64 (Raspberry Pi kernel compatibility).
+
+The full text of the Apache License 2.0 is available at:
+  http://www.apache.org/licenses/LICENSE-2.0
+Upstream LICENSE and NOTICE files are retained inside the image.
+
+"Cilium", "Envoy", and related marks are trademarks of their respective
+owners. Use of these names is for identification only and does not imply
+endorsement.
