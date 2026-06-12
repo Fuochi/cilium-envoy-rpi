@@ -54,7 +54,7 @@ jobs:
   build:
     needs: detect
     if: needs.detect.outputs.any == 'true'
-    runs-on: ubuntu-24.04 # amd64 host: cross-compiles arm64 (same mode the gperftools archive is built in)
+    runs-on: ubuntu-24.04-arm # NATIVE arm64 runner (free on public repos). gperftools must be compiled on real arm64 -- QEMU/cross builds of it fail.
     timeout-minutes: 350
     strategy:
       fail-fast: false
@@ -74,9 +74,6 @@ jobs:
           echo "OWNER=$owner_lc" >> "$GITHUB_ENV"
           echo "IMAGE_NAME=$owner_lc/cilium-envoy" >> "$GITHUB_ENV"
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -94,6 +91,8 @@ jobs:
           # the upstream default (quay.io/cilium), Bazel reuses that public
           # cache and only rebuilds the gperftools-affected targets. We retag
           # and push the finished image to GHCR ourselves in the next step.
+          # Runs on a NATIVE arm64 runner, so gperftools is compiled on real
+          # arm64 hardware (the supported path) -- no QEMU/cross emulation.
           ARCH=arm64 \
           BAZEL_BUILD_OPTS="--define tcmalloc=gperftools --jobs=2" \
           DOCKER_BUILD_OPTS="--output=type=docker" \
