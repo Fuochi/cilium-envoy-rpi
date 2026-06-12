@@ -1,0 +1,119 @@
+name: cilium-envoy-arm64-rpi
+
+on:
+  schedule:
+    - cron: '0 4 * * *' # daily, 04:00 UTC
+  workflow_dispatch:
+    inputs:
+      force_all:
+        description: Rebuild every matrix entry, even if already on GHCR
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: cilium-envoy-rpi
+  cancel-in-progress: false # one run at a time; don't stack a manual run on the cron
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{github.repository_owner}}/cilium-envoy
+  OWNER: ${{github.repository_owner}}
+  UPSTREAM: cilium/proxy
+  LATEST_PATCH_ONLY: 'true' # "false" = build every patch in the matrix
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{steps.parse.outputs.matrix}}
+      any: ${{steps.parse.outputs.any}}
+    steps:
+      - name: Checkout (for tools/parse_matrix.py)
+        uses: actions/checkout@v4
+
+      - name: Fetch upstream compatibility matrix
+        run: curl -fsSL "https://raw.githubusercontent.com/${UPSTREAM}/main/README.md" -o README.upstream.md
+
+      - name: Parse matrix & compute work list
+        id: parse
+        env:
+          GH_TOKEN: ${{secrets.GITHUB_TOKEN}}
+          FORCE_ALL: ${{inputs.force_all}}
+        run: python3 tools/parse_matrix.py README.upstream.md
+
+  build:
+    needs: detect
+    if: needs.detect.outputs.any == 'true'
+    runs-on: ubuntu-24.04 # amd64 host: cross-compiles arm64 (same mode the gperftools archive is built in)
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix: ${{fromJSON(needs.detect.outputs.matrix)}}
+    steps:
+      - name: Checkout cilium/proxy @ ${{matrix.branch}}
+        uses: actions/checkout@v4
+        with:
+          repository: cilium/proxy
+          ref: ${{matrix.branch}}
+          fetch-depth: 1
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{github.actor}}
+          password: ${{secrets.GITHUB_TOKEN}}
+
+      - name: Resolve gperftools archive ref
+        id: arch
+        run: |
+          archive="${REGISTRY}/${OWNER}/cilium-envoy-builder:${{matrix.envoy}}-arm64-rpi-archive"
+          echo "ref=$archive" >> "$GITHUB_OUTPUT"
+          if docker manifest inspect "$archive" >/dev/null 2>&1; then
+            echo "exists=true"  >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build & push gperftools archive (only if missing)
+        if: steps.arch.outputs.exists == 'false'
+        run: |
+          ARCH=arm64 \
+          BAZEL_BUILD_OPTS="--define tcmalloc=gperftools --jobs=2" \
+          DOCKER_DEV_ACCOUNT="${REGISTRY}/${OWNER}" \
+          BUILDER_ARCHIVE_TAG="${{matrix.envoy}}-arm64-rpi-archive" \
+          make docker-builder-archive
+
+      - name: Build cilium-envoy (arm64, Raspberry Pi / gperftools)
+        run: |
+          ARCH=arm64 \
+          BAZEL_BUILD_OPTS="--define tcmalloc=gperftools --jobs=2" \
+          ARCHIVE_IMAGE="${{steps.arch.outputs.ref}}" \
+          DOCKER_BUILD_OPTS="--output=type=docker" \
+          DOCKER_DEV_ACCOUNT="${REGISTRY}/${OWNER}" \
+          make docker-image-envoy
+          built="$(docker images --format '{{.Repository}}:{{.Tag}}' | grep -m1 'cilium-envoy')"
+          echo "Built local image: $built"
+          echo "BUILT_IMAGE=$built" >> "$GITHUB_ENV"
+
+      - name: Tag & push to GHCR
+        run: |
+          base="${REGISTRY}/${IMAGE_NAME}"
+          envoy="${{matrix.envoy}}"
+          docker tag  "$BUILT_IMAGE" "${base}:${envoy}-arm64-rpi"
+          docker push "${base}:${envoy}-arm64-rpi"
+          for c in ${{matrix.ciliums}}; do
+            docker tag  "$BUILT_IMAGE" "${base}:cilium-${c}-arm64-rpi"
+            docker push "${base}:cilium-${c}-arm64-rpi"
+          done
