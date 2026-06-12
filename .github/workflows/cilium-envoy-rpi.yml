@@ -32,6 +32,9 @@ jobs:
       matrix: ${{steps.parse.outputs.matrix}}
       any: ${{steps.parse.outputs.any}}
     steps:
+      - name: Normalize owner (GHCR repo names must be lowercase)
+        run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+
       - name: Checkout (for tools/parse_matrix.py)
         uses: actions/checkout@v4
 
@@ -61,6 +64,12 @@ jobs:
           repository: cilium/proxy
           ref: ${{matrix.branch}}
           fetch-depth: 1
+
+      - name: Normalize owner / image name (GHCR repo names must be lowercase)
+        run: |
+          owner_lc="${GITHUB_REPOSITORY_OWNER,,}"
+          echo "OWNER=$owner_lc" >> "$GITHUB_ENV"
+          echo "IMAGE_NAME=$owner_lc/cilium-envoy" >> "$GITHUB_ENV"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
