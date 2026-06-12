@@ -24,6 +24,9 @@ env:
   OWNER: ${{github.repository_owner}}
   UPSTREAM: cilium/proxy
   LATEST_PATCH_ONLY: 'true' # "false" = build every patch in the matrix
+  # NOTE: OWNER/IMAGE_NAME below may contain uppercase (e.g. "Fuochi"). GHCR
+  # requires lowercase repo names, so each job re-derives a lowercase OWNER in
+  # a "Normalize owner" step before any image tag is built.
 
 jobs:
   detect:
@@ -84,35 +87,19 @@ jobs:
           username: ${{github.actor}}
           password: ${{secrets.GITHUB_TOKEN}}
 
-      - name: Resolve gperftools archive ref
-        id: arch
-        run: |
-          archive="${REGISTRY}/${OWNER}/cilium-envoy-builder:${{matrix.envoy}}-arm64-rpi-archive"
-          echo "ref=$archive" >> "$GITHUB_OUTPUT"
-          if docker manifest inspect "$archive" >/dev/null 2>&1; then
-            echo "exists=true"  >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Build & push gperftools archive (only if missing)
-        if: steps.arch.outputs.exists == 'false'
-        run: |
-          ARCH=arm64 \
-          BAZEL_BUILD_OPTS="--define tcmalloc=gperftools --jobs=2" \
-          DOCKER_DEV_ACCOUNT="${REGISTRY}/${OWNER}" \
-          BUILDER_ARCHIVE_TAG="${{matrix.envoy}}-arm64-rpi-archive" \
-          make docker-builder-archive
-
       - name: Build cilium-envoy (arm64, Raspberry Pi / gperftools)
         run: |
+          # Do NOT set DOCKER_DEV_ACCOUNT. It controls where the prebuilt
+          # BUILDER_BASE + ARCHIVE_IMAGE cache images are PULLED from. Left at
+          # the upstream default (quay.io/cilium), Bazel reuses that public
+          # cache and only rebuilds the gperftools-affected targets. We retag
+          # and push the finished image to GHCR ourselves in the next step.
           ARCH=arm64 \
           BAZEL_BUILD_OPTS="--define tcmalloc=gperftools --jobs=2" \
-          ARCHIVE_IMAGE="${{steps.arch.outputs.ref}}" \
           DOCKER_BUILD_OPTS="--output=type=docker" \
-          DOCKER_DEV_ACCOUNT="${REGISTRY}/${OWNER}" \
           make docker-image-envoy
-          built="$(docker images --format '{{.Repository}}:{{.Tag}}' | grep -m1 'cilium-envoy')"
+          # Capture the freshly built local image (exclude the *-builder images)
+          built="$(docker images --format '{{.Repository}}:{{.Tag}}' | grep '/cilium-envoy:' | grep -v -- '-builder' | head -n1)"
           echo "Built local image: $built"
           echo "BUILT_IMAGE=$built" >> "$GITHUB_ENV"
 
