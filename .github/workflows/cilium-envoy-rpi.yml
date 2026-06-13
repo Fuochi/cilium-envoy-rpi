@@ -55,7 +55,7 @@ jobs:
     needs: detect
     if: needs.detect.outputs.any == 'true'
     runs-on: ubuntu-24.04-arm # NATIVE arm64 runner (free on public repos). gperftools must be compiled on real arm64 -- QEMU/cross builds of it fail.
-    timeout-minutes: 350
+    timeout-minutes: 350 # GitHub hard-cancels hosted jobs at 6h; stop short so the cache post-step still runs
     strategy:
       fail-fast: false
       max-parallel: 2
@@ -84,6 +84,23 @@ jobs:
           username: ${{github.actor}}
           password: ${{secrets.GITHUB_TOKEN}}
 
+      - name: Add swap (lets us raise Bazel --jobs without OOM on the 16 GB runner)
+        run: |
+          sudo fallocate -l 12G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+
+      - name: Restore & persist Bazel cache across runs (resumes after a timeout)
+        # Persists BuildKit's id=arm64 cache mount (/cilium/proxy/.cache). Bazel's
+        # disk cache keeps COMPLETED actions, so a cancelled run resumes next time.
+        # Saves in a post-step (best-effort on timeout). Pin to the latest v3 tag.
+        uses: reproducible-containers/buildkit-cache-dance@v3.1.2
+        with:
+          cache-map: |
+            { "bazel-cache": { "target": "/cilium/proxy/.cache", "id": "arm64" } }
+          cache-key: bazel-arm64-${{matrix.envoy}}
+
       - name: Build cilium-envoy (arm64, Raspberry Pi / gperftools)
         run: |
           # Do NOT set DOCKER_DEV_ACCOUNT. It controls where the prebuilt
@@ -94,7 +111,7 @@ jobs:
           # Runs on a NATIVE arm64 runner, so gperftools is compiled on real
           # arm64 hardware (the supported path) -- no QEMU/cross emulation.
           ARCH=arm64 \
-          BAZEL_BUILD_OPTS="--define tcmalloc=gperftools --jobs=2" \
+          BAZEL_BUILD_OPTS="--define tcmalloc=gperftools --jobs=4 --local_ram_resources=HOST_RAM*.6" \
           DOCKER_BUILD_OPTS="--output=type=docker" \
           make docker-image-envoy
           # Capture the freshly built local image (exclude the *-builder images)
