@@ -86,10 +86,13 @@ jobs:
 
       - name: Add swap (lets us raise Bazel --jobs without OOM on the 16 GB runner)
         run: |
-          sudo fallocate -l 12G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
+          # The runner already has an ACTIVE /swapfile, so create a SEPARATE swap
+          # file on /mnt (more free space) rather than resizing the busy one.
+          sudo fallocate -l 12G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+          swapon --show
 
       - name: Restore & persist Bazel cache across runs (resumes after a timeout)
         # Persists BuildKit's id=arm64 cache mount (/cilium/proxy/.cache). Bazel's
